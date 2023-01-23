@@ -1,0 +1,155 @@
+Select
+  nps.NPS,
+  nps.cust_number,
+  nps.cust_id,
+  nps.tenure,
+  nps.rank,
+  nps.zone,
+  nps.branch,
+  nps.survey_date,
+  Setup_OSAT,
+  nps.CSR_Rating,
+  nps.CEC_OSAT,
+  nps.Delv_OSAT,
+  nps.RSR_OSAT,
+  nps.CEC_Made_it_easy,
+  nps.CEC_Ease_of_Contact,
+  nps.CSR_Time_to_Resolve,
+  nps.CSR_Request_Resolved,
+  nps.CSR_Name,
+  coalesce(null,null,max(fr.transaction_date),null) as delivery_date,
+  coalesce(null,null,max(dt.request_number),null) as ticket_id,
+  coalesce(null, null, max(cast(ec.time_period__c as Date)), null) as CEC_date,
+  sum(case
+    when (cw.name in (
+      'Email',
+      'Website'
+    )
+    and (
+      unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+      and 7776000)) then 1
+      when (cw.name is NULL
+      and 
+        unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+        and 7776000)then 0
+        else 0
+      end) as Email_Cases,
+   sum(case
+    when (cw.name in (
+      'Telephone Inbound (CEC)',
+      'Telephone Inbound (CSC)',
+      'Telephone'
+    )
+    and (
+      unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+      and 7776000)) then 1
+      when (cw.name is NULL
+      and (
+        unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+        and 7776000)) then 0
+        else 0
+      end) as Phone_Cases,
+  sum(case
+    when (cw.name in (
+      'Chat',
+      'Live Chat'
+    )
+    and (
+      unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+      and 7776000)) then 1
+      when cw.name is NULL
+      and (
+        unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+        and 7776000) then 0
+        else 0
+      end) as Chat_Cases,
+  sum(case
+    when (cr.name in (
+      'Delivery - Missed',
+      'Delivery Incorrect',
+      'Delivery Schedule - Reschedule',
+      'Delivery - ETA',
+      'Delivery - Delivery Instructions',
+      'Delivery - Route Operations Feedback'
+    )
+    and (
+      unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+      and 7776000)) then 1
+      when cr.name is NULL
+      and (
+        unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+        and 7776000) then 0
+        else 0
+      end) as Delivery_Cases,
+      sum(case
+        when (cr.name in ('Account Update - Account Information')
+        and (
+          unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+          and 7776000)) then 1
+          when cr.name is NULL then 0
+          else 0
+        end) as Account_Cases,
+        sum(case
+          when (cr.name in ('Price - Request', 'Fee - Request')
+          and unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+          and 7776000) then 1
+          when cr.name is NULL then 0
+          else 0
+        end) as Price_Cases,
+        sum(case
+          when ((ec.quit_or_save__c in ('Save', 'Quit')
+          and (
+            unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+            and 7776000))
+            or (cres.name = 'Request Quit')) then 1
+            when (cres.name is NULL
+            and (
+              unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+              and 7776000)) then 0
+              else 0
+            end) as Quit_Cases,
+            sum(case
+              when (cast(ec.casenumber as int) > 0
+              and (
+                unix_timestamp(nps.survey_date) - unix_timestamp(ec.time_period__c) between 0
+                and 7776000)) then 1
+                when ec.casenumber is NULL
+                 then 0
+                  else 0
+                end) as total_cases
+                from
+                  default.VOC_Journey_Mapping_2 nps
+                  left outer join engage.case ec on nps.cust_number = substring(ec.hybris_account_number__c, 2, 10)
+                    left outer join engage.contact_reason cr on cr.id <=> ec.contact_reason_global__c
+                    left outer join engage.contact_resolution cres on cres.id <=> ec.contact_resolution__c
+                    left outer join engage.contact_ways cw on ec.contact_ways_global__c <=> cw.id
+                    left outer join fin_cube.dim_customer dc on nps.cust_number = dc.cust_no
+                    left outer join (select customer_id, transaction_date, request_id, row_number() over (partition by customer_id order by transaction_date desc) as roworder from fin_cube.fact_revenue fr join default.VOC_Journey_Mapping_2 nps on nps.cust_id = fr.customer_id where transaction_type_desc in ('SALE') and (unix_timestamp(nps.survey_date) - (unix_timestamp(cast(fr.transaction_date as timestamp ))) between 0 and 7776000 )) fr on dc.customer_id <=> fr.customer_id and fr.roworder = 1
+                    left outer join fin_cube.dim_request dt on fr.request_id <=> dt.request_id
+                    where
+                        cw.name in (
+                          'Telephone',
+                          'Email',
+                          'Chat',
+                          'Website',
+                          'Telephone Inbound (CEC)',
+                          'Telephone Inbound (CSC)')
+                group by
+                nps.NPS,
+                nps.cust_number,
+                nps.cust_id,
+                nps.tenure,
+                nps.rank,
+                nps.zone,
+                nps.branch,
+                nps.survey_date,
+                nps.Setup_OSAT,
+                nps.CSR_Rating,
+                nps.CEC_OSAT,
+                nps.Delv_OSAT,
+                nps.RSR_OSAT,
+                nps.CEC_Made_it_easy,
+                nps.CEC_Ease_of_Contact,
+                nps.CSR_Time_to_Resolve,
+                nps.CSR_Request_Resolved,
+                nps.CSR_Name
